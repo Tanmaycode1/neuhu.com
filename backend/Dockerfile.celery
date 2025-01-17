@@ -1,0 +1,44 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+ENV DEBIAN_FRONTEND noninteractive
+ENV PYTHONPATH=/app:$PYTHONPATH
+ENV DJANGO_SETTINGS_MODULE=core.settings
+
+WORKDIR /app
+
+# Create celery user
+RUN groupadd -r celery && useradd -r -g celery celery
+
+RUN apt-get update && apt-get install -y \
+    libpq-dev \
+    python3-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create necessary directories first
+RUN mkdir -p /app/core/utils && \
+    chown -R celery:celery /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the utils package first
+COPY core/utils /app/core/utils/
+
+# Copy and set up celery scripts with proper permissions
+COPY start-celery.sh start-celerybeat.sh /app/
+RUN chmod +x /app/start-celery.sh /app/start-celerybeat.sh && \
+    chown celery:celery /app/start-celery.sh /app/start-celerybeat.sh
+
+# Copy the rest of the application
+COPY . .
+
+# Set proper permissions
+RUN chown -R celery:celery /app
+
+# Switch to celery user
+USER celery
+
+CMD ["/app/start-celery.sh"]

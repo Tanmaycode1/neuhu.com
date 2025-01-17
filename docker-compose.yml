@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:14
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=dbname
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d dbname"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app_network
+
+  redis:
+    image: redis:alpine
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app_network
+
+  backend:
+    build: ./backend
+    volumes:
+      - ./backend:/app
+      - static_volume:/app/static
+      - media_volume:/app/media
+      - ./backend/core/utils:/app/core/utils
+    ports:
+      - "8000:8000"
+    environment:
+      - DJANGO_ENV=development
+      - DJANGO_SETTINGS_MODULE=core.settings.local
+      - SECRET_KEY=your-secret-key-here
+      - CORS_ALLOW_ALL_ORIGINS=True
+      - ALLOWED_HOSTS=localhost,127.0.0.1
+      - PYTHONPATH=/app
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - POSTGRES_DB=dbname
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app_network
+
+  celery:
+    build: ./backend
+    command: celery -A core worker -l INFO
+    volumes:
+      - ./backend:/app
+    environment:
+      - C_FORCE_ROOT=true
+      - DJANGO_ENV=development
+      - DJANGO_SETTINGS_MODULE=core.settings.local
+      - SECRET_KEY=your-secret-key-here
+      - POSTGRES_DB=dbname
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app_network
+
+  celery-beat:
+    build: ./backend
+    command: celery -A core beat -l INFO
+    volumes:
+      - ./backend:/app
+    environment:
+      - C_FORCE_ROOT=true
+      - DJANGO_ENV=development
+      - DJANGO_SETTINGS_MODULE=core.settings.local
+      - SECRET_KEY=your-secret-key-here
+      - POSTGRES_DB=dbname
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  static_volume:
+  media_volume:
+
+networks:
+  app_network:
+    driver: bridge
