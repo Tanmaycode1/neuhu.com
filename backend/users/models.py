@@ -205,7 +205,12 @@ class User(AbstractUser):
         super().delete(*args, **kwargs)
 
 class UserProfile(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    user = models.OneToOneField(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='profile',
+        unique=True  # Explicitly set unique
+    )
     
     phone = models.CharField(max_length=15, blank=True)
     location = models.CharField(max_length=100, blank=True)
@@ -235,6 +240,12 @@ class UserProfile(models.Model):
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    account_privacy = models.CharField(
+        max_length=10,
+        choices=[('PUBLIC', 'Public'), ('PRIVATE', 'Private')],
+        default='PUBLIC'
+    )
 
     class Meta:
         verbose_name = _('user profile')
@@ -253,7 +264,10 @@ class UserProfile(models.Model):
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
     if created:
-        UserProfile.objects.create(user=instance)
+        UserProfile.objects.create(
+            user=instance,
+            account_privacy='PUBLIC'
+        )
 
 @receiver(post_save, sender=User)
 def save_user_profile(sender, instance, **kwargs):

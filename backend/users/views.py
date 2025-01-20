@@ -15,6 +15,8 @@ from PIL import Image
 from io import BytesIO
 import logging
 from rest_framework.authentication import BasicAuthentication
+from django.core.paginator import Paginator
+from django.db.models import Exists, OuterRef
 
 logger = logging.getLogger(__name__)
 
@@ -104,50 +106,170 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['POST'])
     def follow(self, request, pk=None):
         """Follow a user"""
-        user_to_follow = self.get_object()
-        if user_to_follow == request.user:
+        try:
+            user_to_follow = self.get_object()
+            
+            # Check if trying to follow self
+            if user_to_follow == request.user:
+                return api_response(
+                    success=False,
+                    message="You cannot follow yourself",
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check if already following
+            if request.user.following.filter(id=user_to_follow.id).exists():
+                return api_response(
+                    success=True,  # Changed to true to avoid error state in UI
+                    message=f"You are already following {user_to_follow.username}",
+                    data={
+                        'user_id': str(user_to_follow.id),
+                        'username': user_to_follow.username,
+                        'is_followed': True
+                    }
+                )
+            
+            # Add the follow relationship
+            request.user.following.add(user_to_follow)
+            
+            return api_response(
+                success=True,
+                message=f"Successfully followed {user_to_follow.username}",
+                data={
+                    'user_id': str(user_to_follow.id),
+                    'username': user_to_follow.username,
+                    'is_followed': True
+                }
+            )
+                
+        except Exception as e:
+            logger.error(f"Failed to follow user: {str(e)}")
             return api_response(
                 success=False,
-                message="You cannot follow yourself",
+                message="Unable to follow user at this time",
                 status_code=status.HTTP_400_BAD_REQUEST
             )
-        
-        request.user.following.add(user_to_follow)
-        request.user.profile.update_counts()
-        user_to_follow.profile.update_counts()
-        
-        return api_response(
-            message=f"Now following {user_to_follow.username}",
-            data={'user_id': str(user_to_follow.id)}
-        )
 
     @handle_exceptions
     @action(detail=True, methods=['POST'])
     def unfollow(self, request, pk=None):
         """Unfollow a user"""
-        user_to_unfollow = self.get_object()
-        request.user.following.remove(user_to_unfollow)
-        request.user.profile.update_counts()
-        user_to_unfollow.profile.update_counts()
-        
-        return api_response(
-            message=f"Unfollowed {user_to_unfollow.username}",
-            data={'user_id': str(user_to_unfollow.id)}
-        )
+        try:
+            user_to_unfollow = self.get_object()
+            
+            # Check if not following
+            if not request.user.following.filter(id=user_to_unfollow.id).exists():
+                return api_response(
+                    success=True,  # Changed to true to avoid error state in UI
+                    message=f"You are not following {user_to_unfollow.username}",
+                    data={
+                        'user_id': str(user_to_unfollow.id),
+                        'username': user_to_unfollow.username,
+                        'is_followed': False
+                    }
+                )
+            
+            # Remove the follow relationship
+            request.user.following.remove(user_to_unfollow)
+            
+            return api_response(
+                success=True,
+                message=f"Successfully unfollowed {user_to_unfollow.username}",
+                data={
+                    'user_id': str(user_to_unfollow.id),
+                    'username': user_to_unfollow.username,
+                    'is_followed': False
+                }
+            )
+                
+        except Exception as e:
+            logger.error(f"Failed to unfollow user: {str(e)}")
+            return api_response(
+                success=False,
+                message="Unable to unfollow user at this time",
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
     @handle_exceptions
-    @paginate_response
     @action(detail=False, methods=['GET'])
     def followers(self, request):
         """Get list of followers"""
-        return User.objects.filter(following=request.user)
+        try:
+            page_size = int(request.query_params.get('page_size', 10))
+            page = int(request.query_params.get('page', 1))
+            
+            followers = User.objects.filter(following=request.user).annotate(
+                is_followed=Exists(
+                    request.user.following.filter(
+                        id=OuterRef('id')
+                    )
+                )
+            )
+            
+            paginator = Paginator(followers, page_size)
+            current_page = paginator.page(page)
+            
+            serializer = UserSerializer(current_page.object_list, many=True, context={'request': request})
+            
+            return api_response(
+                success=True,
+                message="Followers retrieved successfully",
+                data={
+                    'results': serializer.data,
+                    'count': followers.count(),
+                    'total_pages': paginator.num_pages,
+                    'current_page': page,
+                    'has_next': current_page.has_next(),
+                    'has_previous': current_page.has_previous()
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error fetching followers: {str(e)}")
+            return api_response(
+                success=False,
+                message="Failed to fetch followers",
+                error_code=ErrorCode.API_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
     @handle_exceptions
-    @paginate_response
     @action(detail=False, methods=['GET'])
     def following(self, request):
         """Get list of users being followed"""
-        return request.user.following.all()
+        try:
+            page_size = int(request.query_params.get('page_size', 10))
+            page = int(request.query_params.get('page', 1))
+            
+            following = request.user.following.all()
+            # For following list, all users are followed by definition
+            for user in following:
+                user.is_followed = True
+            
+            paginator = Paginator(following, page_size)
+            current_page = paginator.page(page)
+            
+            serializer = UserSerializer(current_page.object_list, many=True, context={'request': request})
+            
+            return api_response(
+                success=True,
+                message="Following list retrieved successfully",
+                data={
+                    'results': serializer.data,
+                    'count': following.count(),
+                    'total_pages': paginator.num_pages,
+                    'current_page': page,
+                    'has_next': current_page.has_next(),
+                    'has_previous': current_page.has_previous()
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error fetching following: {str(e)}")
+            return api_response(
+                success=False,
+                message="Failed to fetch following list",
+                error_code=ErrorCode.API_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
     @handle_exceptions
     @action(detail=False, methods=['GET'])
@@ -197,16 +319,28 @@ class UserViewSet(viewsets.ModelViewSet):
     @handle_exceptions
     @action(detail=False, methods=['GET'])
     def suggestions(self, request):
-        """Get user suggestions (users not being followed)"""
-        following_ids = request.user.following.values_list('id', flat=True)
-        suggestions = User.objects.exclude(
-            id__in=list(following_ids) + [request.user.id]
-        )[:10]  # Limit to 10 suggestions
-        serializer = self.get_serializer(suggestions, many=True)
-        return api_response(
-            message="User suggestions retrieved",
-            data=serializer.data
-        )
+        """Get user suggestions"""
+        try:
+            # Your existing suggestion logic
+            suggestions = User.objects.exclude(
+                id=request.user.id
+            ).exclude(
+                followers=request.user
+            ).order_by('?')[:5]  # Random 5 users
+            
+            # Use UserSerializer with proper context
+            serializer = UserSerializer(suggestions, many=True, context={'request': request})
+            
+            return Response({
+                'success': True,
+                'data': serializer.data
+            })
+        except Exception as e:
+            logger.error(f"Error fetching suggestions: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to fetch suggestions'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -339,40 +473,68 @@ def update_avatar(request):
             # Save to BytesIO
             img_io = BytesIO()
             img.save(img_io, format='JPEG', quality=85)
+            img_io.seek(0)
+
+            # Generate unique filename with timestamp
+            from django.utils import timezone
+            import os
             
-            # Generate unique filename
-            file_name = f"avatars/{request.user.id}/{avatar.name}"
+            # Create user-specific directory path
+            user_directory = f'avatars/{request.user.id}'
+            timestamp = timezone.now().strftime('%Y%m%d%H%M%S')
+            file_extension = os.path.splitext(avatar.name)[1].lower()
+            if not file_extension:
+                file_extension = '.jpg'
+            
+            file_name = f'{user_directory}/{timestamp}{file_extension}'
+
+            # Ensure the directory exists
+            full_path = os.path.join(default_storage.location, user_directory)
+            os.makedirs(full_path, exist_ok=True)
             
             # Delete old avatar if exists
             if request.user.avatar:
-                default_storage.delete(request.user.avatar.name)
+                try:
+                    default_storage.delete(request.user.avatar.name)
+                except Exception as e:
+                    logger.warning(f"Error deleting old avatar: {e}")
             
             # Save new avatar
-            request.user.avatar = default_storage.save(
+            saved_path = default_storage.save(
                 file_name, 
                 ContentFile(img_io.getvalue())
             )
+            
+            # Update user's avatar field
+            request.user.avatar = saved_path
             request.user.save()
+            
+            # Get the full URL
+            avatar_url = default_storage.url(saved_path)
             
             return Response({
                 'success': True,
                 'data': {
-                    'avatar_url': request.user.avatar.url if request.user.avatar else None
-                }
+                    'avatar_url': avatar_url
+                },
+                'message': 'Avatar updated successfully'
             })
             
         except Exception as e:
+            logger.error(f"Error processing image: {e}")
             return error_response(
                 "Error processing image", 
                 ErrorCode.INVALID_IMAGE
             )
             
     except Exception as e:
+        logger.error(f"Error updating avatar: {e}")
         return error_response(
             str(e), 
             ErrorCode.UNKNOWN_ERROR, 
             status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -393,7 +555,16 @@ def update_profile(request):
         'last_name',
         'bio',
         'social_links',
-        'account_privacy'
+        'account_privacy',
+        # Add profile fields
+        'phone',
+        'location',
+        'birth_date',
+        'website',
+        'gender',
+        'occupation',
+        'company',
+        'education'
     ]
 
     filtered_data = {
@@ -411,7 +582,8 @@ def update_profile(request):
         serializer.save()
         return Response({
             'success': True,
-            'data': serializer.data
+            'data': serializer.data,
+            'message': 'Profile updated successfully'
         })
     
     return error_response(

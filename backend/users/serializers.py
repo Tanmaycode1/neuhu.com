@@ -1,11 +1,20 @@
 from rest_framework import serializers
 from .models import User, UserProfile
+from django.conf import settings
 
 class UserProfileSerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
     full_name = serializers.SerializerMethodField()
     follower_count = serializers.SerializerMethodField()
     following_count = serializers.SerializerMethodField()
+    phone = serializers.CharField(source='profile.phone', required=False, allow_blank=True)
+    location = serializers.CharField(source='profile.location', required=False, allow_blank=True)
+    birth_date = serializers.DateField(source='profile.birth_date', required=False, allow_null=True)
+    website = serializers.URLField(source='profile.website', required=False, allow_blank=True)
+    gender = serializers.CharField(source='profile.gender', required=False, allow_blank=True)
+    occupation = serializers.CharField(source='profile.occupation', required=False, allow_blank=True)
+    company = serializers.CharField(source='profile.company', required=False, allow_blank=True)
+    education = serializers.CharField(source='profile.education', required=False, allow_blank=True)
 
     class Meta:
         model = User
@@ -26,7 +35,15 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'date_joined',
             'last_active',
             'email_verified',
-            'is_verified'
+            'is_verified',
+            'phone',
+            'location',
+            'birth_date',
+            'website',
+            'gender',
+            'occupation',
+            'company',
+            'education'
         ]
         read_only_fields = [
             'id', 
@@ -52,6 +69,14 @@ class UserProfileSerializer(serializers.ModelSerializer):
         return obj.following.count()
 
     def update(self, instance, validated_data):
+        # Handle profile data
+        profile_data = validated_data.pop('profile', {})
+        if profile_data:
+            profile = instance.profile
+            for attr, value in profile_data.items():
+                setattr(profile, attr, value)
+            profile.save()
+
         # Handle social links
         social_links = validated_data.pop('social_links', None)
         if social_links is not None:
@@ -91,10 +116,29 @@ class UserProfileDetailSerializer(UserProfileSerializer):
 
 # Keep existing serializers
 class UserSerializer(serializers.ModelSerializer):
+    is_followed = serializers.BooleanField(read_only=True)
+    avatar = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ('id', 'email', 'username', 'first_name', 'last_name', 'bio', 'avatar')
-        read_only_fields = ('id', 'email')
+        fields = [
+            'id', 
+            'username', 
+            'first_name', 
+            'last_name', 
+            'email', 
+            'bio', 
+            'avatar',
+            'is_followed'
+        ]
+
+    def get_avatar(self, obj):
+        if obj.avatar:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.avatar.url)
+            return obj.avatar.url
+        return None
 
 class UserCreateSerializer(serializers.ModelSerializer):
     class Meta:

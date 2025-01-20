@@ -1,5 +1,6 @@
 from rest_framework.response import Response
 from rest_framework import status
+from typing import Any
 
 class ErrorCode:
     # Auth Errors
@@ -37,22 +38,43 @@ ERROR_MESSAGES = {
     ErrorCode.FILE_TOO_LARGE: "File size should not exceed 5MB"
 }
 
-def api_response(data=None, message=None, success=True, status_code=status.HTTP_200_OK, error_code=None):
+def api_response(
+    message: str = "",
+    data: Any = None,
+    success: bool = True,
+    status_code: int = status.HTTP_200_OK
+) -> Response:
+    """
+    Standard API response format
+    """
     response_data = {
-        'success': success,
-        'message': message,
-        'error_code': error_code
+        "success": success,
+        "message": message,
+        "data": data
     }
     
-    if data is not None:
-        response_data['data'] = data
-        
-    return Response(response_data, status=status_code)
+    return Response(
+        response_data,
+        status=status_code
+    )
 
-def error_response(message, error_code, status_code=status.HTTP_400_BAD_REQUEST):
-    return api_response(
-        success=False,
-        message=message,
-        error_code=error_code,
-        status_code=status_code
+def error_response(
+    message: str,
+    error_code: ErrorCode,
+    status_code: int = status.HTTP_400_BAD_REQUEST,
+    errors: dict = None
+) -> Response:
+    """
+    Standard error response format
+    """
+    response_data = {
+        "success": False,
+        "message": message,
+        "error_code": error_code,
+        "errors": errors
+    }
+    
+    return Response(
+        response_data,
+        status=status_code
     ) 
