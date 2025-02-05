@@ -3,8 +3,8 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
-from .models import User, UserProfile
-from .serializers import UserSerializer, UserCreateSerializer, UserProfileSerializer
+from .models import User, UserProfile,Notification
+from .serializers import UserSerializer, UserCreateSerializer, UserProfileSerializer, UserPublicProfileSerializer,NotificationSerializer
 from core.decorators import handle_exceptions, paginate_response
 from core.utils.response import api_response, error_response, ErrorCode
 from rest_framework.decorators import api_view, permission_classes, parser_classes, authentication_classes
@@ -16,7 +16,7 @@ from io import BytesIO
 import logging
 from rest_framework.authentication import BasicAuthentication
 from django.core.paginator import Paginator
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q
 
 logger = logging.getLogger(__name__)
 
@@ -105,50 +105,41 @@ class UserViewSet(viewsets.ModelViewSet):
     @handle_exceptions
     @action(detail=True, methods=['POST'])
     def follow(self, request, pk=None):
-        """Follow a user"""
-        try:
-            user_to_follow = self.get_object()
-            
-            # Check if trying to follow self
-            if user_to_follow == request.user:
-                return api_response(
-                    success=False,
-                    message="You cannot follow yourself",
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Check if already following
-            if request.user.following.filter(id=user_to_follow.id).exists():
-                return api_response(
-                    success=True,  # Changed to true to avoid error state in UI
-                    message=f"You are already following {user_to_follow.username}",
-                    data={
-                        'user_id': str(user_to_follow.id),
-                        'username': user_to_follow.username,
-                        'is_followed': True
-                    }
-                )
-            
-            # Add the follow relationship
-            request.user.following.add(user_to_follow)
-            
-            return api_response(
-                success=True,
-                message=f"Successfully followed {user_to_follow.username}",
-                data={
-                    'user_id': str(user_to_follow.id),
-                    'username': user_to_follow.username,
-                    'is_followed': True
-                }
-            )
-                
-        except Exception as e:
-            logger.error(f"Failed to follow user: {str(e)}")
-            return api_response(
-                success=False,
-                message="Unable to follow user at this time",
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
+     """Follow a user"""
+     try:
+        user_to_follow = self.get_object()
+        
+        # Check if trying to follow self
+        if request.user == user_to_follow:
+            return Response({
+                'success': False,
+                'message': 'Cannot follow yourself'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if already following
+        if request.user.following.filter(id=user_to_follow.id).exists():
+            return Response({
+                'success': False,
+                'message': f'Already following {user_to_follow.username}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Add to following
+        request.user.following.add(user_to_follow)
+        
+        # Create notification
+        user_to_follow.create_follow_notification(request.user)
+        
+        return Response({
+            'success': True,
+            'message': f'Now following {user_to_follow.username}'
+        })
+        
+     except Exception as e:
+        return Response({
+            'success': False,
+            'message': str(e)
+        }, status=status.HTTP_400_BAD_REQUEST)
+
 
     @handle_exceptions
     @action(detail=True, methods=['POST'])
@@ -159,36 +150,23 @@ class UserViewSet(viewsets.ModelViewSet):
             
             # Check if not following
             if not request.user.following.filter(id=user_to_unfollow.id).exists():
-                return api_response(
-                    success=True,  # Changed to true to avoid error state in UI
-                    message=f"You are not following {user_to_unfollow.username}",
-                    data={
-                        'user_id': str(user_to_unfollow.id),
-                        'username': user_to_unfollow.username,
-                        'is_followed': False
-                    }
-                )
-            
-            # Remove the follow relationship
+                return Response({
+                    'success': False,
+                    'message': f'Not following {user_to_unfollow.username}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             request.user.following.remove(user_to_unfollow)
             
-            return api_response(
-                success=True,
-                message=f"Successfully unfollowed {user_to_unfollow.username}",
-                data={
-                    'user_id': str(user_to_unfollow.id),
-                    'username': user_to_unfollow.username,
-                    'is_followed': False
-                }
-            )
-                
+            return Response({
+                'success': True,
+                'message': f'Unfollowed {user_to_unfollow.username}'
+            })
+            
         except Exception as e:
-            logger.error(f"Failed to unfollow user: {str(e)}")
-            return api_response(
-                success=False,
-                message="Unable to unfollow user at this time",
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({
+                'success': False,
+                'message': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
 
     @handle_exceptions
     @action(detail=False, methods=['GET'])
@@ -341,6 +319,9 @@ class UserViewSet(viewsets.ModelViewSet):
                 'success': False,
                 'message': 'Failed to fetch suggestions'
             }, status=status.HTTP_400_BAD_REQUEST)
+
+
+
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -590,4 +571,167 @@ def update_profile(request):
         "Invalid data provided", 
         ErrorCode.INVALID_FORMAT, 
         errors=serializer.errors
-    )        
+    )  
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_user_profile_view(request, user_id):
+    """Get specific user's profile by ID"""
+    logger.info(f"Fetching profile for user_id: {user_id}")
+    
+    try:
+        # Get the requested user
+        user = get_object_or_404(User, id=user_id)
+        logger.info(f"Found user: {user.username}")
+        
+        # Base user data
+        data = {
+            'id': str(user.id),
+            'email': user.email,
+            'username': user.username,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'bio': user.bio,
+            'avatar': user.avatar.url if user.avatar else None,
+            'social_links': user.social_links,
+            'account_privacy': user.account_privacy,
+            'is_verified': user.is_verified,
+            
+            # Add counts
+            'followers_count': user.followers.count(),
+            'following_count': user.following.count(),
+            
+            # Add profile data
+            'phone': user.profile.phone,
+            'location': user.profile.location,
+            'birth_date': user.profile.birth_date,
+            'website': user.profile.website,
+            'gender': user.profile.gender,
+            'occupation': user.profile.occupation,
+            'company': user.profile.company,
+            'education': user.profile.education,
+            
+            # Add follow status if not own profile
+            'is_followed': request.user.following.filter(id=user.id).exists() if request.user.id != user.id else None
+        }
+            
+        logger.info(f"Successfully retrieved profile for user: {user.username}")
+        
+        return api_response(
+            success=True,
+            message="User profile retrieved successfully",
+            data=data
+        )
+        
+    except User.DoesNotExist:
+        logger.error(f"User not found with id: {user_id}")
+        return api_response(
+            success=False,
+            message="User not found",
+            status_code=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        logger.error(f"Error fetching user profile: {str(e)}")
+        return api_response(
+            success=False,
+            message=f"Failed to fetch user profile: {str(e)}",
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def search_users(request):
+    query = request.GET.get('q', '').strip()
+    if len(query) < 2:
+        return Response({
+            'success': True,
+            'data': []
+        })
+
+    users = User.objects.filter(
+        Q(username__icontains=query) |
+        Q(first_name__icontains=query) |
+        Q(last_name__icontains=query)
+    ).exclude(
+        id=request.user.id
+    )[:10]
+
+    data = []
+    for user in users:
+        user_data = {
+            'id': str(user.id),
+            'username': user.username,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'avatar': user.avatar.url if user.avatar else None
+        }
+        data.append(user_data)
+
+    return Response({
+        'success': True,
+        'data': data
+    })
+
+class NotificationViewSet(viewsets.ModelViewSet):
+    serializer_class = NotificationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = self.request.user.notifications.all()
+        
+        # Filter by notification type if specified
+        notification_type = self.request.query_params.get('type')
+        if notification_type:
+            queryset = queryset.filter(notification_type=notification_type)
+            
+        # Filter unread only if specified
+        unread_only = self.request.query_params.get('unread_only') == 'true'
+        if unread_only:
+            queryset = queryset.filter(is_read=False)
+            
+        return queryset
+
+    @handle_exceptions
+    def list(self, request):
+        """Get all notifications"""
+        page_size = int(request.query_params.get('page_size', 10))
+        page = int(request.query_params.get('page', 1))
+        
+        notifications = self.get_queryset()
+        
+        paginator = Paginator(notifications, page_size)
+        current_page = paginator.page(page)
+        
+        serializer = self.get_serializer(current_page.object_list, many=True)
+        
+        return api_response(
+            message="Notifications retrieved successfully",
+            data={
+                'results': serializer.data,
+                'count': notifications.count(),
+                'total_pages': paginator.num_pages,
+                'current_page': page,
+                'has_next': current_page.has_next(),
+                'has_previous': current_page.has_previous(),
+                'unread_count': request.user.get_unread_notifications_count()
+            }
+        )
+
+    @action(detail=False, methods=['POST'])
+    def mark_all_read(self, request):
+        """Mark all notifications as read"""
+        request.user.mark_all_notifications_as_read()
+        return api_response(message="All notifications marked as read")
+
+    @action(detail=True, methods=['POST'])
+    def mark_read(self, request, pk=None):
+        """Mark single notification as read"""
+        notification = self.get_object()
+        notification.mark_as_read()
+        return api_response(message="Notification marked as read")
+
+    @action(detail=False, methods=['DELETE'])
+    def clear_all(self, request):
+        """Delete all notifications"""
+        self.get_queryset().delete()
+        return api_response(message="All notifications cleared successfully")

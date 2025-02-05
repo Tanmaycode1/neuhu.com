@@ -11,59 +11,6 @@ from rest_framework.decorators import api_view, permission_classes, authenticati
 
 ##aa
 
-class RegisterView(APIView):
-    permission_classes = [AllowAny]
-    
-    def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
-        if serializer.is_valid():
-            email = serializer.validated_data['email']
-            try:
-                # Check if user exists and is verified
-                user = User.objects.get(email=email)
-                if not user.email_verified:
-                    return Response({
-                        'success': False,
-                        'message': 'Email must be verified before registration'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                
-                # Update existing user
-                user.set_password(serializer.validated_data['password'])
-                user.username = serializer.validated_data['username']
-                user.first_name = serializer.validated_data.get('first_name', '')
-                user.last_name = serializer.validated_data.get('last_name', '')
-                user.is_active = True
-                user.save()
-            except User.DoesNotExist:
-                # Create new user if doesn't exist
-                user = serializer.save()
-                user.is_active = True
-                user.save()
-
-            # Generate tokens
-            refresh = RefreshToken.for_user(user)
-            return Response({
-                'success': True,
-                'data': {
-                    'user': {
-                        'id': str(user.id),
-                        'email': user.email,
-                        'username': user.username,
-                        'first_name': user.first_name,
-                        'last_name': user.last_name
-                    },
-                    'tokens': {
-                        'refresh': str(refresh),
-                        'access': str(refresh.access_token),
-                    }
-                }
-            }, status=status.HTTP_201_CREATED)
-
-        return Response({
-            'success': False,
-            'errors': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
-
 class LoginView(APIView):
     permission_classes = [AllowAny]
     
@@ -210,23 +157,70 @@ def register(request):
     first_name = request.data.get('first_name', '')
     last_name = request.data.get('last_name', '')
 
-    # Validate required fields
-    if not all([email, password, username]):
+    # Input validation
+    if not all([email, password]):
         return Response({
             'success': False,
-            'message': 'Email, password and username are required'
+            'message': 'Missing required fields',
+            'errors': {
+                'email': ['This field is required'] if not email else [],
+                'password': ['This field is required'] if not password else [],
+            }
         }, status=status.HTTP_400_BAD_REQUEST)
 
     try:
+        # Check if user exists
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({
+                'success': False,
+                'message': 'Please verify your email first',
+                'errors': {
+                    'email': ['Email verification required before registration']
+                }
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # Check if email is verified
-        user = User.objects.get(email=email)
         if not user.email_verified:
             return Response({
                 'success': False,
-                'message': 'Email must be verified before registration'
+                'message': 'Please verify your email first',
+                'errors': {
+                    'email': ['Email not verified']
+                }
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Update existing user (from OTP verification)
+        # Check if user is already active
+        if user.is_active:
+            return Response({
+                'success': False,
+                'message': 'Email already registered',
+                'errors': {
+                    'email': ['An account with this email already exists']
+                }
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Username uniqueness check
+        if username:
+            if User.objects.filter(username=username).exclude(email=email).exists():
+                return Response({
+                    'success': False,
+                    'message': 'Username already taken',
+                    'errors': {
+                        'username': ['This username is already taken']
+                    }
+                }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            # Generate username from email if not provided
+            base_username = email.split('@')[0]
+            username = base_username
+            counter = 1
+            while User.objects.filter(username=username).exists():
+                username = f"{base_username}{counter}"
+                counter += 1
+
+        # Update the user with registration details
         user.set_password(password)
         user.username = username
         user.first_name = first_name
@@ -252,16 +246,16 @@ def register(request):
                     'last_name': user.last_name
                 }
             }
-        })
-    except User.DoesNotExist:
-        return Response({
-            'success': False,
-            'message': 'Email not found or not verified'
-        }, status=status.HTTP_400_BAD_REQUEST)
+        }, status=status.HTTP_201_CREATED)
+
     except Exception as e:
+        logger.error(f"Registration error for email {email}: {str(e)}")
         return Response({
             'success': False,
-            'message': str(e)
+            'message': 'Registration failed',
+            'errors': {
+                'non_field_errors': [str(e)]
+            }
         }, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
@@ -273,35 +267,46 @@ def login(request):
     password = request.data.get('password')
 
     # Validate required fields
-    if not all([email, password]):
+    if not email or not password:
         return Response({
             'success': False,
-            'message': 'Email and password are required'
+            'message': 'Email and password are required',
+            'errors': {
+                'email': ['This field is required'] if not email else [],
+                'password': ['This field is required'] if not password else []
+            }
         }, status=status.HTTP_400_BAD_REQUEST)
 
     try:
         # Check if user exists
         user = User.objects.get(email=email)
-        if not user.email_verified:
-            return Response({
-                'success': False,
-                'message': 'Email not verified'
-            }, status=status.HTTP_403_FORBIDDEN)
-
+        
         # Authenticate user
-        authenticated_user = authenticate(
-            request,
-            email=email,
-            password=password
-        )
+        authenticated_user = authenticate(request, email=email, password=password)
+        
         if authenticated_user is None:
             return Response({
                 'success': False,
-                'message': 'Invalid credentials'
+                'message': 'Invalid password',
+                'errors': {
+                    'password': ['The password you entered is incorrect']
+                }
             }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Check if email is verified
+        if not authenticated_user.email_verified:
+            authenticated_user.generate_and_send_otp()
+            return Response({
+                'success': False,
+                'message': 'Email not verified',
+                'errors': {
+                    'email': ['Please verify your email. A new verification code has been sent.']
+                }
+            }, status=status.HTTP_403_FORBIDDEN)
 
         # Generate tokens
         refresh = RefreshToken.for_user(authenticated_user)
+        
         return Response({
             'success': True,
             'data': {
@@ -310,19 +315,28 @@ def login(request):
                     'access': str(refresh.access_token),
                 },
                 'user': {
-                    'id': authenticated_user.id,
+                    'id': str(authenticated_user.id),
                     'email': authenticated_user.email,
-                    'username': authenticated_user.username
+                    'username': authenticated_user.username,
+                    'first_name': authenticated_user.first_name,
+                    'last_name': authenticated_user.last_name
                 }
             }
         })
+
     except User.DoesNotExist:
         return Response({
             'success': False,
-            'message': 'User not found'
+            'message': 'User not found',
+            'errors': {
+                'email': ['No account found with this email address']
+            }
         }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return Response({
             'success': False,
-            'message': str(e)
+            'message': 'Login failed',
+            'errors': {
+                'non_field_errors': [str(e)]
+            }
         }, status=status.HTTP_400_BAD_REQUEST)

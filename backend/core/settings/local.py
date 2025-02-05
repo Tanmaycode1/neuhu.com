@@ -13,10 +13,11 @@ DATABASES = {
         'NAME': os.environ.get('POSTGRES_DB', 'dbname'),
         'USER': os.environ.get('POSTGRES_USER', 'user'),
         'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'password'),
-        'HOST': os.environ.get('POSTGRES_HOST', 'db'),
+        'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
         'PORT': os.environ.get('POSTGRES_PORT', '5432'),
     }
 }
+
 
 # CORS settings
 CORS_ALLOWED_ORIGINS = [

@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 User = get_user_model()
 
@@ -30,3 +31,21 @@ class SearchLog(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.query}"
+
+class SearchQuery(models.Model):
+    query = models.CharField(max_length=255)
+    user = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='searches'
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['query', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username}: {self.query}"

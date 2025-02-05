@@ -122,6 +122,69 @@ class User(AbstractUser):
     
     def get_full_name(self):
         return f"{self.first_name} {self.last_name}".strip()
+    
+    def create_like_notification(self, liker, post):
+     """Create notification when someone likes user's post"""
+     from django.contrib.contenttypes.models import ContentType
+     from .models import Notification  # Import here to avoid circular import
+
+     return Notification.objects.create(
+        recipient=self,
+        sender=liker,
+        notification_type='LIKE',
+        message=f"{liker.username} liked your post",
+        redirect_url=f"/posts/{post.id}",
+        content_type=ContentType.objects.get_for_model(post.__class__),
+        object_id=str(post.id),
+        extra_data={
+            'post_id': str(post.id),
+            'preview': post.content[:100] if hasattr(post, 'content') else ''
+        }
+     )
+
+    def create_comment_notification(self, commenter, post, comment):
+     """Create notification when someone comments on user's post"""
+     from django.contrib.contenttypes.models import ContentType
+     from .models import Notification
+
+     return Notification.objects.create(
+        recipient=self,
+        sender=commenter,
+        notification_type='COMMENT',
+        message=f"{commenter.username} commented on your post",
+        redirect_url=f"/posts/{post.id}#comment-{comment.id}",
+        content_type=ContentType.objects.get_for_model(post.__class__),
+        object_id=str(post.id),
+        extra_data={
+            'post_id': str(post.id),
+            'comment_id': str(comment.id),
+            'comment_preview': comment.content[:100] if hasattr(comment, 'content') else ''
+        }
+     )
+        
+    def get_unread_notifications_count(self):
+        return self.notifications.filter(is_read=False).count()
+
+    def get_recent_notifications(self, limit=10):
+        return self.notifications.all()[:limit]
+
+    def mark_all_notifications_as_read(self):
+        from django.utils import timezone
+        self.notifications.filter(is_read=False).update(
+            is_read=True,
+            read_at=timezone.now()
+        )
+
+    def create_follow_notification(self, follower):
+        """Create notification when someone follows the user"""
+        Notification.objects.create(
+            recipient=self,
+            sender=follower,
+            notification_type='FOLLOW',
+            message=f"{follower.username} started following you",
+            redirect_url=f"/profile/{follower.id}"
+        ) 
+
 
     def generate_and_send_otp(self):
      """Generate and send OTP for email verification"""
@@ -272,3 +335,83 @@ def create_user_profile(sender, instance, created, **kwargs):
 @receiver(post_save, sender=User)
 def save_user_profile(sender, instance, **kwargs):
     instance.profile.save()
+
+
+from django.utils.translation import gettext_lazy as _
+
+class Notification(models.Model):
+    # Notification Types
+    NOTIFICATION_TYPES = [
+        ('LIKE', 'Like'),
+        ('COMMENT', 'Comment'),
+        ('FOLLOW', 'Follow'),
+        ('MENTION', 'Mention'),
+        ('REPLY', 'Reply'),
+        ('SHARE', 'Share')
+    ]
+
+    recipient = models.ForeignKey(
+        'User', 
+        on_delete=models.CASCADE,
+        related_name='notifications'
+    )
+    
+    sender = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='sent_notifications'
+    )
+
+    notification_type = models.CharField(
+        max_length=20,
+        choices=NOTIFICATION_TYPES
+    )
+
+    # Generic foreign key for different content types
+    content_type = models.ForeignKey(
+        'contenttypes.ContentType',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True
+    )
+    object_id = models.CharField(max_length=255, null=True, blank=True)
+    
+    # Message to display
+    message = models.TextField()
+    
+    # Link to redirect when clicked
+    redirect_url = models.CharField(max_length=500, blank=True)
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+    is_read = models.BooleanField(default=False)
+    
+    # Additional metadata
+    extra_data = models.JSONField(default=dict, blank=True)
+    
+    class Meta:
+        verbose_name = _('notification')
+        verbose_name_plural = _('notifications')
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['recipient', '-created_at']),
+            models.Index(fields=['is_read', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"Notification for {self.recipient.username} - {self.notification_type}"
+
+    def mark_as_read(self):
+        from django.utils import timezone
+        self.is_read = True
+        self.read_at = timezone.now()
+        self.save()
+
+    @property
+    def is_recent(self):
+        """Check if notification is less than 24 hours old"""
+        from django.utils import timezone
+        from datetime import timedelta
+        return (timezone.now() - self.created_at) < timedelta(days=1)

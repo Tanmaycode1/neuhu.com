@@ -19,9 +19,18 @@ class RegisterSerializer(serializers.ModelSerializer):
         fields = ('email', 'password', 'username', 'first_name', 'last_name')
 
     def validate_email(self, value):
-        if User.objects.filter(email=value, email_verified=True, is_active=True).exists():
-            raise serializers.ValidationError('User with this email already exists')
-        return value
+        try:
+            user = User.objects.get(email=value)
+            if user.email_verified and user.is_active:
+                # If user exists, is verified and active, allow registration
+                return value
+            elif not user.email_verified:
+                # If user exists but not verified, allow registration
+                return value
+            else:
+                raise serializers.ValidationError('User with this email already exists')
+        except User.DoesNotExist:
+            return value
 
     def create(self, validated_data):
         if 'username' not in validated_data:

@@ -15,6 +15,12 @@ class Post(models.Model):
     type = models.CharField(max_length=5, choices=POST_TYPES)
     title = models.CharField(max_length=200)
     description = models.TextField()
+    image = models.ImageField(
+        upload_to='posts/images/',
+        storage=default_storage,
+        null=True,
+        blank=True
+    )
     audio_file = models.FileField(
         upload_to='audio/',
         storage=default_storage,
@@ -32,8 +38,11 @@ class Post(models.Model):
     class Meta:
         ordering = ['-created_at']
 
-    def __str__(self):
-        return f"{self.author.username}: {self.title[:50]}"
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        
+        if self.type == 'AUDIO' and not self.image:
+            raise ValidationError('Image is required for audio posts')  
 
 class Comment(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -70,3 +79,11 @@ class TrendingScore(models.Model):
 
     class Meta:
         ordering = ['-score']
+
+class PostView(models.Model):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='views')
+    user = models.ForeignKey('users.User', on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('post', 'user')

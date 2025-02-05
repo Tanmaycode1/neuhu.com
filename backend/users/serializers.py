@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, UserProfile
+from .models import User, UserProfile,Notification
 from django.conf import settings
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -116,28 +116,26 @@ class UserProfileDetailSerializer(UserProfileSerializer):
 
 # Keep existing serializers
 class UserSerializer(serializers.ModelSerializer):
-    is_followed = serializers.BooleanField(read_only=True)
     avatar = serializers.SerializerMethodField()
+    is_followed = serializers.BooleanField(read_only=True)
+    posts_count = serializers.IntegerField(read_only=True)
+    followers_count = serializers.IntegerField(read_only=True)
+    following_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = User
         fields = [
-            'id', 
-            'username', 
-            'first_name', 
-            'last_name', 
-            'email', 
-            'bio', 
-            'avatar',
-            'is_followed'
+            'id', 'username', 'first_name', 'last_name', 
+            'email', 'bio', 'avatar', 'is_followed',
+            'posts_count', 'followers_count', 'following_count'
         ]
 
     def get_avatar(self, obj):
-        if obj.avatar:
-            request = self.context.get('request')
+        request = self.context.get('request')
+        if obj.avatar and hasattr(obj.avatar, 'url'):
             if request:
                 return request.build_absolute_uri(obj.avatar.url)
-            return obj.avatar.url
+            return obj.avatar.url  # Return relative URL if no request
         return None
 
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -149,3 +147,35 @@ class UserCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         user = User.objects.create_user(**validated_data)
         return user
+
+class UserPublicProfileSerializer(serializers.ModelSerializer):
+    follower_count = serializers.SerializerMethodField()
+    following_count = serializers.SerializerMethodField()
+    is_followed = serializers.BooleanField(read_only=True)
+    
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'first_name', 'last_name', 'email',
+            'avatar_url', 'bio', 'is_followed', 'follower_count',
+            'following_count'
+        ]
+        read_only_fields = fields
+
+    def get_follower_count(self, obj):
+        return obj.followers.count()
+
+    def get_following_count(self, obj):
+        return obj.following.count()
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    sender = UserSerializer(read_only=True)
+    
+    class Meta:
+        model = Notification
+        fields = [
+            'id', 'notification_type', 'sender', 'message',
+            'redirect_url', 'created_at', 'read_at', 'is_read',
+            'is_recent'
+        ]

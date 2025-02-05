@@ -12,9 +12,9 @@ psycopg2-binary==2.9.9
 redis==5.0.1
 messaging
 # Channels & WebSockets
-channels==4.0.0
-channels-redis==4.1.0
-daphne==4.0.0
+channels>=4.0.0
+channels-redis>=4.1.0
+daphne>=4.0.0
 
 # Media Processing
 Pillow==10.2.0
@@ -83,3 +83,4 @@ django-silk==5.0.4
 # Add these if not already present
 psycopg2-binary>=2.9.1
 django-postgres-extensions>=0.9.3 
+drf-nested-routers

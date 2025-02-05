@@ -45,14 +45,13 @@ INSTALLED_APPS = [
     'posts.apps.PostsConfig',
     'media.apps.MediaConfig',
     'interactions.apps.InteractionsConfig',
-    'chat.apps.ChatConfig',
-    'notifications.apps.NotificationsConfig',
     'search.apps.SearchConfig',
     'tags.apps.TagsConfig',
     'admin_panel.apps.AdminPanelConfig',
     'analytics.apps.AnalyticsConfig',
     'moderation.apps.ModerationConfig',
     'api.apps.ApiConfig',
+    'chat.apps.ChatConfig',
     'django.contrib.postgres',
 ]
 
