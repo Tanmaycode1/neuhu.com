@@ -15,6 +15,12 @@ class ChatRoom(models.Model):
         related_name='chat_rooms',
         help_text="Users participating in this chat room"
     )
+    online_participants = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name='online_chat_rooms',
+        blank=True,
+        help_text="Users currently online in this chat room"
+    )
     created_at = models.DateTimeField(
         auto_now_add=True,
         help_text="When the chat room was created"
@@ -37,6 +43,46 @@ class ChatRoom(models.Model):
         if participants.exists():
             return f"Chat between {', '.join(str(p) for p in participants)}"
         return f"Empty Chat Room {self.id}"
+
+    def is_user_connected(self, user):
+        """Check if a user has an active connection to this room."""
+        return user.id in self.online_participants
+
+    def store_connection(self, user, connection_id):
+        """Store connection information for a user."""
+        if not hasattr(self, '_connections'):
+            self._connections = {}
+        self._connections[user.id] = connection_id
+
+    def remove_connection(self, user):
+        """Remove connection information for a user."""
+        if hasattr(self, '_connections') and user.id in self._connections:
+            del self._connections[user.id]
+
+    def add_online_participant(self, user):
+        """Add a user to the list of online participants."""
+        if not self.online_participants:
+            self.online_participants = []
+        if user.id not in self.online_participants:
+            self.online_participants.append(user.id)
+            self.save()
+        return True
+
+    def remove_online_participant(self, user):
+        """Remove a user from the list of online participants."""
+        if self.online_participants and user.id in self.online_participants:
+            self.online_participants.remove(user.id)
+            self.remove_connection(user)
+            self.save()
+        return True
+
+    def is_participant_online(self, user):
+        """Check if a participant is online."""
+        return user in self.online_participants.all()
+
+    def get_online_participants(self):
+        """Get all online participants."""
+        return self.online_participants.all()
 
     def get_last_message(self):
         """Get the most recent message in the chat room."""
@@ -139,7 +185,7 @@ class Message(models.Model):
         blank=True,
         help_text="Type of the attached file"
     )
-
+    updated_at = models.DateTimeField(auto_now=True) 
     class Meta:
         db_table = 'chat_message'
         ordering = ['created_at']

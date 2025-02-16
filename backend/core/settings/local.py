@@ -18,6 +18,15 @@ DATABASES = {
     }
 }
 
+# Channel Layers Configuration
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [('redis', 6379)],
+        },
+    },
+}
 
 # CORS settings
 CORS_ALLOWED_ORIGINS = [

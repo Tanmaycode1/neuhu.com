@@ -34,7 +34,7 @@ services:
 
   backend:
     build: ./backend
-    command: daphne -b 0.0.0.0 -p 8000 core.asgi:application
+    command: bash -c "python manage.py collectstatic --noinput && daphne -b 0.0.0.0 -p 8000 core.asgi:application"
     volumes:
       - ./backend:/app
       - static_volume:/app/static
@@ -43,6 +43,9 @@ services:
     ports:
       - "8000:8000"
     environment:
+      - DAPHNE_HOST=0.0.0.0
+      - DAPHNE_PORT=8000
+      - DAPHNE_WEBSOCKET_TIMEOUT=300
       - DJANGO_ENV=development
       - DJANGO_SETTINGS_MODULE=core.settings.local
       - SECRET_KEY=your-secret-key-here

@@ -243,15 +243,16 @@ CORS_ALLOW_HEADERS = [
 AUTH_USER_MODEL = 'users.User'
 
 # Channels configuration
-ASGI_APPLICATION = 'core.asgi.application'
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            "hosts": [(os.getenv('REDIS_HOST', 'localhost'), 6379)],
+            "hosts": [(os.environ.get('CHANNEL_LAYERS_HOST', 'redis'), 6379)],
         },
     },
 }
+
+ASGI_APPLICATION = 'core.routing.application'
 
 # Google OAuth2 settings
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')

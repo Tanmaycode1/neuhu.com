@@ -39,8 +39,8 @@ print(f'Settings module: {settings.SETTINGS_MODULE}')
 # Start application
 if [ "$DJANGO_ENV" = "production" ]; then
     echo "Starting production server..."
-    gunicorn core.wsgi:application --bind 0.0.0.0:8000 --workers 4 --log-level debug
+    daphne -b 0.0.0.0 -p 8000 core.asgi:application
 else
     echo "Starting development server..."
-    python manage.py runserver 0.0.0.0:8000
+    daphne -b 0.0.0.0 -p 8000 core.asgi:application
 fi

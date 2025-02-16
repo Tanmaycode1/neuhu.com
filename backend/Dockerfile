@@ -20,27 +20,23 @@ RUN apt-get update && apt-get install -y \
     netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
 COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install wheel && \
     pip install --no-cache-dir -r requirements.txt && \
     pip install channels channels-redis daphne
 
-# Copy scripts
-COPY entrypoint.sh run-dev.sh ./
-RUN chmod +x entrypoint.sh run-dev.sh
+COPY entrypoint.sh ./
+RUN chmod +x entrypoint.sh
 
-# Create necessary directories
 RUN mkdir -p /app/media/audio /app/media/avatars /app/static /app/staticfiles /app/core/utils
 RUN chmod -R 755 /app
 
-# Copy the rest of the application
 COPY . .
 
-# Verify core module structure
 RUN python -c "import core; print('Core module found')"
 
 EXPOSE 8000
 
 ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "core.asgi:application", "--websocket-timeout", "300"]

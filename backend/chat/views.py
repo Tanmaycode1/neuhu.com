@@ -31,54 +31,43 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
         return context
     
     def create(self, request, *args, **kwargs):
+     try:
         participant_id = request.data.get('participant_id')
-        
         if not participant_id:
-            return Response({
-                'success': False,
-                'message': 'participant_id is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success': False, 'message': 'participant_id required'}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+
+        participant = get_object_or_404(User, id=participant_id)
         
-        try:
-            participant = User.objects.get(id=participant_id)
-            
-            # Check if chat room already exists
-            existing_room = ChatRoom.objects.filter(
-                participants=request.user
-            ).filter(
-                participants=participant
-            ).first()
-            
-            if existing_room:
-                serializer = self.get_serializer(existing_room)
-                return Response({
-                    'success': True,
-                    'data': serializer.data,
-                    'message': 'Existing chat room retrieved'
-                })
-            
-            # Create new chat room
-            chat_room = ChatRoom.objects.create()
-            chat_room.participants.add(request.user, participant)
-            
-            serializer = self.get_serializer(chat_room)
+        # Modified query to check existing rooms properly
+        existing_room = ChatRoom.objects.filter(
+            participants=request.user
+        ).filter(
+            participants=participant
+        ).distinct().first()
+        
+        if existing_room:
+            serializer = self.get_serializer(existing_room)
             return Response({
                 'success': True,
-                'data': serializer.data,
-                'message': 'Chat room created successfully'
+                'data': serializer.data
             })
             
-        except User.DoesNotExist:
-            return Response({
-                'success': False,
-                'message': 'Participant not found'
-            }, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            return Response({
-                'success': False,
-                'message': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
+        # Create new room
+        room = ChatRoom.objects.create()
+        room.participants.add(request.user, participant)
+        room.save()  # Ensure room is saved
+        
+        serializer = self.get_serializer(room)
+        return Response({
+            'success': True,
+            'data': serializer.data
+        })
+     except Exception as e:
+        return Response({
+            'success': False, 
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)   
     @action(detail=True, methods=['post'])
     def mark_read(self, request, pk=None):
         try:
