@@ -23,7 +23,15 @@ CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            "hosts": [('redis', 6379)],
+            "hosts": [(os.environ.get('CHANNEL_LAYERS_HOST', 'redis'), 6379)],
+            "capacity": 1500,
+            "expiry": 10,  # Message expiry in seconds
+            "group_expiry": 60,  # Group expiry in seconds
+            "channel_capacity": {
+                "http.request": 1000,
+                "http.response!*": 1000,
+                "websocket.send!*": 1000,
+            },
         },
     },
 }
@@ -42,13 +50,18 @@ if DEBUG:
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://redis:6379/0",
+        "LOCATION": f"redis://{os.environ.get('CHANNEL_LAYERS_HOST', 'redis')}:6379/0",
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "SOCKET_CONNECT_TIMEOUT": 5,  # seconds
+            "SOCKET_TIMEOUT": 5,  # seconds
+            "RETRY_ON_TIMEOUT": True,
+            "MAX_CONNECTIONS": 1000,
+            "CONNECTION_POOL_KWARGS": {"max_connections": 100},
         }
     }
 }
 
 # Celery
-CELERY_BROKER_URL = 'redis://redis:6379/0'
-CELERY_RESULT_BACKEND = 'redis://redis:6379/0' 
+CELERY_BROKER_URL = f"redis://{os.environ.get('CHANNEL_LAYERS_HOST', 'redis')}:6379/0"
+CELERY_RESULT_BACKEND = f"redis://{os.environ.get('CHANNEL_LAYERS_HOST', 'redis')}:6379/0" 

@@ -61,19 +61,15 @@ class ChatRoom(models.Model):
 
     def add_online_participant(self, user):
         """Add a user to the list of online participants."""
-        if not self.online_participants:
-            self.online_participants = []
-        if user.id not in self.online_participants:
-            self.online_participants.append(user.id)
-            self.save()
+        if user not in self.online_participants.all():
+            self.online_participants.add(user)
         return True
 
     def remove_online_participant(self, user):
         """Remove a user from the list of online participants."""
-        if self.online_participants and user.id in self.online_participants:
-            self.online_participants.remove(user.id)
+        if user in self.online_participants.all():
+            self.online_participants.remove(user)
             self.remove_connection(user)
-            self.save()
         return True
 
     def is_participant_online(self, user):
